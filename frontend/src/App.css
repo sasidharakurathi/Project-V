@@ -1,0 +1,815 @@
+/* Jarvis Holographic / Military HUD Aesthetic */
+:root {
+  --core-bg: #000205;
+  /* Absolute darkest teal/black */
+  --hud-cyan: #00e5ff;
+  --hud-cyan-dim: rgba(0, 229, 255, 0.15);
+  --hud-cyan-glow: rgba(0, 229, 255, 0.4);
+  --hud-amber: #ff9d00;
+  --hud-amber-dim: rgba(255, 157, 0, 0.15);
+  --hud-amber-glow: rgba(255, 157, 0, 0.4);
+  --hud-text-primary: #e0faff;
+  --hud-text-secondary: #7abccc;
+
+  --font-display: 'Rajdhani', sans-serif;
+  --font-data: 'JetBrains Mono', monospace;
+}
+
+body {
+  margin: 0;
+  background-color: var(--core-bg);
+  color: var(--hud-text-primary);
+  font-family: var(--font-data);
+  overflow: hidden;
+  text-transform: uppercase;
+  /* HUD stylistic choice */
+}
+
+/* Background grid - like a tactical targeting screen */
+.hud-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: radial-gradient(circle at center, #00121f 0%, var(--core-bg) 100%);
+  position: relative;
+  box-sizing: border-box;
+}
+
+.hud-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--hud-cyan-dim) 1px, transparent 1px),
+    linear-gradient(90deg, var(--hud-cyan-dim) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+  opacity: 0.3;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Custom Title Bar */
+.custom-title-bar {
+  height: 32px;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--hud-cyan-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 1000;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.title-bar-drag-area {
+  flex: 1;
+  height: 100%;
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.title-bar-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.app-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--hud-cyan);
+  text-shadow: 0 0 5px var(--hud-cyan-glow);
+}
+
+.sub-name {
+  font-size: 10px;
+  opacity: 0.6;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.tech-decor-left,
+.tech-decor-right {
+  height: 2px;
+  background: var(--hud-cyan-dim);
+  flex: 1;
+  max-width: 100px;
+  position: relative;
+}
+
+.close-btn {
+  width: 48px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--hud-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-app-region: no-drag;
+}
+
+.close-btn:hover {
+  background: #e81123;
+  color: white;
+}
+
+/* Header */
+.hud-header {
+  padding: 12px 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--hud-cyan);
+  background: linear-gradient(180deg, rgba(0, 229, 255, 0.1) 0%, transparent 100%);
+  /* -webkit-app-region: drag;  MOVED TO CUSTOM TITLE BAR */
+  z-index: 10;
+  position: relative;
+}
+
+/* Header decorative tech elements */
+.hud-header::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 20%;
+  width: 60%;
+  height: 3px;
+  background: var(--hud-cyan);
+  box-shadow: 0 0 15px var(--hud-cyan);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-left h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--hud-cyan);
+  text-shadow: 0 0 10px var(--hud-cyan-glow);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.scene-badge {
+  padding: 4px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hud-cyan);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 14px;
+  letter-spacing: 1px;
+  transition: all 0.4s ease;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.scene-label {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.scene-mode {
+  font-weight: 700;
+  text-shadow: 0 0 10px currentColor;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px;
+  border: 1px solid var(--hud-cyan);
+  background: var(--hud-cyan-dim);
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--hud-cyan);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.status-dot.connected {
+  background-color: var(--hud-cyan);
+  box-shadow: 0 0 8px var(--hud-cyan);
+}
+
+.status-dot.disconnected {
+  background-color: #ff003c;
+  box-shadow: 0 0 8px #ff003c;
+}
+
+.status-dot.connecting {
+  background-color: var(--hud-amber);
+  animation: blink 1s infinite alternate;
+}
+
+@keyframes blink {
+  0% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--hud-text-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: all 0.3s;
+}
+
+.icon-btn:hover {
+  color: var(--hud-cyan);
+  filter: drop-shadow(0 0 5px var(--hud-cyan));
+}
+
+/* Grid Layout */
+.hud-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.8fr) 1.5fr minmax(320px, 1fr);
+  gap: 16px;
+  padding: 16px;
+  height: calc(100vh - 65px);
+  min-height: 0;
+  /* Critical for grid children to respect height */
+  z-index: 10;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Severe Tech Panels */
+.panel {
+  background: rgba(0, 10, 15, 0.6);
+  border: 1px solid var(--hud-cyan-dim);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  /* Contain children */
+  height: 100%;
+  /* Fill grid cell */
+  /* Angled cut corners common in HUDs */
+  clip-path: polygon(20px 0,
+      100% 0,
+      100% calc(100% - 20px),
+      calc(100% - 20px) 100%,
+      0 100%,
+      0 20px);
+}
+
+/* Simulated Viewfinder Corners using SVG/borders would be complex with clip-path, 
+   so we use inset shadows and linear gradients to simulate depth. */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--hud-cyan);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.panel-header {
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--hud-cyan-dim);
+  background: linear-gradient(90deg, var(--hud-cyan-dim) 0%, transparent 100%);
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  color: var(--hud-cyan);
+  text-shadow: 0 0 8px var(--hud-cyan-glow);
+}
+
+.panel-body {
+  padding: 20px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tech Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 229, 255, 0.05);
+  border-left: 1px solid var(--hud-cyan-dim);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--hud-cyan);
+  box-shadow: 0 0 10px var(--hud-cyan);
+}
+
+/* Telemetry Left Panel */
+.telemetry-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  align-content: start;
+  padding-bottom: 12px;
+}
+
+.stat-box {
+  background: rgba(0, 229, 255, 0.05);
+  border: 1px solid rgba(0, 229, 255, 0.15);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 4px;
+}
+
+.stat-box-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--hud-text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.stat-box-value {
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--hud-text-primary);
+  text-shadow: 0 0 5px var(--hud-cyan-glow);
+}
+
+.stat-sub {
+  font-size: 10px;
+  color: var(--hud-cyan);
+  opacity: 0.8;
+  margin-left: 2px;
+}
+
+/* Waveform Visualizer */
+.waveform-container {
+  margin-top: auto;
+  border-top: 1px solid rgba(0, 229, 255, 0.1);
+  padding-top: 12px;
+}
+
+.bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 30px;
+}
+
+.bar {
+  width: 4px;
+  background: var(--hud-cyan);
+  opacity: 0.8;
+}
+
+.bars.listening .bar {
+  background: var(--hud-amber);
+  box-shadow: 0 0 10px var(--hud-amber);
+}
+
+/* Center Column (Arc Reactor / Orbital Display) */
+.center-panel {
+  background: transparent;
+  border: none;
+  clip-path: none;
+  backdrop-filter: none;
+  justify-content: center;
+  align-items: center;
+  gap: 30px;
+}
+
+.voice-core {
+  text-align: center;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Holographic Rotating Rings */
+.voice-core::before,
+.voice-core::after {
+  content: '';
+  position: absolute;
+  top: 90px;
+  /* Center aligned with the orb */
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.voice-core::before {
+  width: 280px;
+  height: 280px;
+  border: 1px dashed var(--hud-cyan);
+  opacity: 0.3;
+  animation: spin 40s linear infinite;
+}
+
+.voice-core::after {
+  width: 320px;
+  height: 320px;
+  border: 2px solid transparent;
+  border-top-color: var(--hud-cyan);
+  border-bottom-color: var(--hud-cyan);
+  opacity: 0.15;
+  animation: spin-reverse 20s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes spin-reverse {
+  from {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+
+  to {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+}
+
+.orb-wrapper {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 30px;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* The central "Arc Reactor" */
+.voice-orb {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, #004455, #000);
+  border: 2px solid var(--hud-cyan);
+  box-shadow:
+    0 0 30px var(--hud-cyan-glow),
+    inset 0 0 20px var(--hud-cyan-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  position: relative;
+}
+
+/* Inner glow core */
+.voice-orb::after {
+  content: '';
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  background: var(--hud-cyan);
+  border-radius: 50%;
+  filter: blur(8px);
+  opacity: 0.5;
+  transition: all 0.3s;
+}
+
+.voice-orb.active {
+  border-color: var(--hud-amber);
+  background: radial-gradient(circle at center, #553300, #000);
+  box-shadow:
+    0 0 60px var(--hud-amber-glow),
+    inset 0 0 30px var(--hud-amber-glow);
+}
+
+.voice-orb.active::after {
+  background: var(--hud-amber);
+  opacity: 0.8;
+  filter: blur(12px);
+  animation: core-pulse 1s infinite alternate;
+}
+
+@keyframes core-pulse {
+  from {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+
+  to {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+/* SPEAKING state — purple/violet orb */
+.voice-orb.speaking {
+  border-color: #a855f7;
+  background: radial-gradient(circle at center, #2d1050, #000);
+  box-shadow:
+    0 0 60px rgba(168, 85, 247, 0.5),
+    inset 0 0 30px rgba(168, 85, 247, 0.3);
+}
+
+.voice-orb.speaking::after {
+  background: #a855f7;
+  opacity: 0.8;
+  filter: blur(12px);
+  animation: speaking-pulse 0.8s infinite alternate;
+}
+
+@keyframes speaking-pulse {
+  from {
+    transform: scale(0.85);
+    opacity: 0.5;
+  }
+
+  to {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+.orb-wrapper svg {
+  z-index: 5;
+  /* Ensure microphone icon is above the glow */
+}
+
+.voice-core h3 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  margin: 0;
+  letter-spacing: 6px;
+  color: var(--hud-cyan);
+  text-shadow: 0 0 15px var(--hud-cyan-glow);
+}
+
+.voice-core.listening h3 {
+  color: var(--hud-amber);
+  text-shadow: 0 0 15px var(--hud-amber-glow);
+}
+
+.voice-core .subtitle {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--hud-text-secondary);
+  margin-top: 8px;
+}
+
+/* Text Input Fallback */
+.text-input-form {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 400px;
+  background: rgba(0, 20, 30, 0.6);
+  border: 1px solid var(--hud-cyan);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  position: relative;
+  z-index: 10;
+  margin-top: 40px;
+}
+
+.text-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--hud-cyan);
+  font-family: var(--font-data);
+  font-size: 12px;
+  padding: 14px 16px;
+  outline: none;
+}
+
+.text-input::placeholder {
+  color: var(--hud-text-secondary);
+  opacity: 0.5;
+}
+
+.text-submit-btn {
+  background: var(--hud-cyan-dim);
+  border-left: 1px solid var(--hud-cyan);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.text-submit-btn:not(:disabled):hover {
+  background: var(--hud-cyan);
+  color: #000;
+  box-shadow: 0 0 20px var(--hud-cyan);
+}
+
+.text-submit-btn:disabled {
+  opacity: 0.3;
+}
+
+/* Skills Grid */
+.mini-skills {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+  z-index: 10;
+}
+
+.mini-skill-btn {
+  background: rgba(0, 20, 30, 0.4);
+  border: 1px solid var(--hud-cyan-dim);
+  padding: 16px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mini-skill-btn:hover {
+  background: var(--hud-cyan-dim);
+  border-color: var(--hud-cyan);
+  box-shadow: inset 0 0 15px var(--hud-cyan-dim);
+  transform: translateY(-2px);
+}
+
+.mini-skill-btn span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--hud-text-secondary);
+}
+
+.mini-skill-btn:hover span {
+  color: var(--hud-cyan);
+}
+
+/* Right Panel: History and Logs */
+.log-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.log-list {
+  font-family: var(--font-data);
+  gap: 8px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border-left: 2px solid var(--hud-cyan-dim);
+}
+
+.log-time {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.log-msg {
+  color: var(--hud-text-secondary);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+/* ADK Interaction History */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 20px;
+}
+
+.chat-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  position: relative;
+  /* Tactical bracket corner cuts */
+  clip-path: polygon(10px 0,
+      100% 0,
+      100% calc(100% - 10px),
+      calc(100% - 10px) 100%,
+      0 100%,
+      0 10px);
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 6px;
+}
+
+.chat-role {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+
+.chat-time {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.chat-text {
+  font-size: 12px;
+  color: var(--hud-text-primary);
+  line-height: 1.6;
+  text-transform: none;
+  /* Keep natural casing for actual conversation text */
+}
+
+/* Sender: USER */
+.chat-entry.user {
+  border-left: 3px solid var(--hud-cyan);
+  margin-left: 20px;
+}
+
+.chat-entry.user .chat-role {
+  color: var(--hud-cyan);
+}
+
+/* Sender: VEGA (AI) */
+.chat-entry.vega {
+  border-right: 3px solid var(--hud-amber);
+  margin-right: 20px;
+  /* Flip the cut corners for opposite side */
+  clip-path: polygon(0 0,
+      calc(100% - 10px) 0,
+      100% 10px,
+      100% 100%,
+      10px 100%,
+      0 calc(100% - 10px));
+  text-align: right;
+}
+
+.chat-entry.vega .chat-header {
+  flex-direction: row-reverse;
+}
+
+.chat-entry.vega .chat-role {
+  color: var(--hud-amber);
+  text-shadow: 0 0 5px var(--hud-amber-glow);
+}
