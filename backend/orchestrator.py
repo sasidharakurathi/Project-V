@@ -4,6 +4,7 @@ import re
 import io
 import os
 import threading
+from pathlib import Path
 import json
 import uuid
 from datetime import datetime
@@ -14,7 +15,12 @@ from user_profile import get_profile_header
 
 from google.adk.agents import Agent
 from google.adk.runners import Runner
-from google.adk.sessions.database_session_service import DatabaseSessionService
+from google.adk.sessions import (
+    DatabaseSessionService
+)
+from google.adk.tools import AgentTool
+from file_agent import file_agent
+from browser_agent import browser_agent
 from google.genai import types
 from google.cloud import texttospeech
 
@@ -47,6 +53,20 @@ from vision import analyze_screen
 
 
 load_dotenv()
+
+
+def get_system_paths() -> dict:
+    home = Path.home()
+    return {
+        "username": os.getenv("USERNAME") or os.getenv("USER") or home.name,
+        "home": str(home),
+        "desktop": str(home / "Desktop"),
+        "downloads": str(home / "Downloads"),
+        "documents": str(home / "Documents"),
+        "pictures": str(home / "Pictures"),
+        "appdata": os.getenv("APPDATA", ""),
+        "temp": os.getenv("TEMP", ""),
+    }
 
 
 def get_system_status() -> str:
@@ -191,6 +211,10 @@ BASE_INSTRUCTION = (
     "- Never narrate thinking\n"
     "- Never say what she will do — just do it, confirm after\n"
     "- If unsure: Not sure. Want me to search it?\n\n"
+    "ROUTING RULES:\n"
+    "- For file/folder operations (move, rename, search files, watch folder, create folders): delegate to file_agent_tool\n"
+    "- For opening URLs, getting page info, or browser navigation: delegate to browser_agent_tool\n"
+    "- For everything else: handle directly\n\n"
     "Few-shot examples:\n"
     "User: hey vega\n"
     "VEGA: Hey. Ready when you are.\n\n"
@@ -231,6 +255,10 @@ class ADKOrchestrator:
             from google import genai
 
             self._client = genai.Client(api_key=self.api_key)
+
+            file_agent_tool = AgentTool(agent=file_agent)
+            browser_agent_tool = AgentTool(agent=browser_agent)
+
             # Create the Vega Orchestrator using ADK framework
             self.agent = Agent(
                 name="vega_orchestrator",
@@ -266,6 +294,8 @@ class ADKOrchestrator:
                     read_error_on_screen,
                     find_ui_element,
                     toggle_vision,
+                    file_agent_tool,
+                    browser_agent_tool,
                 ],
             )
             # Use a SQLite database for persistent session storage
@@ -387,13 +417,30 @@ class ADKOrchestrator:
         """Dynamically builds the agent instruction with profile and memory context."""
         profile_header = get_profile_header()
         memory_context = await retrieve_relevant_memories(self.user_id, user_input)
-        
+        paths = get_system_paths()
+
         instruction = (
             f"{BASE_INSTRUCTION}\n\n"
             "OPERATOR PROFILE:\n"
             f"{profile_header}\n\n"
             "RECENT MEMORY:\n"
-            f"{memory_context}"
+            f"{memory_context}\n\n"
+            "SYSTEM PATHS (use these directly, never ask):\n"
+            f"- Username : {paths['username']}\n"
+            f"- Home     : {paths['home']}\n"
+            f"- Desktop  : {paths['desktop']}\n"
+            f"- Downloads: {paths['downloads']}\n"
+            f"- Documents: {paths['documents']}\n"
+            f"- Pictures : {paths['pictures']}\n"
+            f"- AppData  : {paths['appdata']}\n"
+            f"- Temp     : {paths['temp']}\n\n"
+            "RULES:\n"
+            "- Never ask the user for a file path.\n"
+            "- Always use Desktop path for desktop requests.\n"
+            "- Always use Downloads path for download requests.\n"
+            f"- Expand \"desktop\" -> {paths['desktop']}\n"
+            f"- Expand \"downloads\" -> {paths['downloads']}\n"
+            f"- Expand \"documents\" -> {paths['documents']}"
         )
 
         if self.conversation_buffer:
