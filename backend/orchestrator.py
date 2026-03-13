@@ -4,7 +4,13 @@ import re
 import io
 import os
 import threading
+import json
+import uuid
+from datetime import datetime
+import aiosqlite
 from dotenv import load_dotenv
+from episodic_memory import save_memory, retrieve_relevant_memories
+from user_profile import get_profile_header
 
 from google.adk.agents import Agent
 from google.adk.runners import Runner
@@ -93,7 +99,7 @@ async def restore_scene(name: str) -> str:
     return f"I couldn't find a saved scene named '{name}'."
 
 
-VEGA_INSTRUCTION = (
+BASE_INSTRUCTION = (
     "Identity:\n"
     "VEGA — Virtual Executive General Assistant.\n"
     "AI core of this workstation.\n"
@@ -151,6 +157,10 @@ class ADKOrchestrator:
         self.state = "IDLE"
         self._client = None
         self._interrupt_requested = False  # Set True to cancel in-flight tasks
+        self.conversation_active = False
+        self._conversation_timer = None
+        self.conversation_buffer = []
+        self.max_buffer_size = 6
 
         self.api_key = os.environ.get("GEMINI_API_KEY")
         if not self.api_key:
@@ -166,7 +176,7 @@ class ADKOrchestrator:
             self.agent = Agent(
                 name="vega_orchestrator",
                 model="gemini-2.5-flash",
-                instruction=VEGA_INSTRUCTION,
+                instruction=BASE_INSTRUCTION,
                 tools=[
                     get_system_status,
                     open_application,
@@ -209,7 +219,101 @@ class ADKOrchestrator:
                 session_service=self.session_service,
                 auto_create_session=True,
             )
-            self.session_id = "vega_session_1"
+            self.user_id = self._load_or_create_config()
+            self.session_id = datetime.now().strftime("session_%Y%m%d_%H%M%S")
+            asyncio.create_task(self._cleanup_old_sessions())
+
+    def _load_or_create_config(self) -> str:
+        """Loads user_id from vega_config.json or creates it if missing."""
+        config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "vega_config.json")
+        )
+        if not os.path.exists(config_path):
+            user_id = str(uuid.uuid4())
+            config = {"user_id": user_id, "vision_enabled": False}
+            with open(config_path, "w") as f:
+                json.dump(config, f, indent=4)
+            print(f"[Config] Generated new user_id: {user_id}")
+            return user_id
+
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                user_id = config.get("user_id")
+                if not user_id:
+                    user_id = str(uuid.uuid4())
+                    config["user_id"] = user_id
+                    with open(config_path, "w") as f_out:
+                        json.dump(config, f_out, indent=4)
+                return user_id
+        except Exception as e:
+            print(f"[Config] Error reading config: {e}. Falling back to transient ID.")
+            return "user_1"
+
+    async def _cleanup_old_sessions(self):
+        """Cleanup old sessions from the database."""
+        try:
+            db_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "vega_sessions.db")
+            )
+            async with aiosqlite.connect(db_path) as db:
+                # Check for created_at column
+                async with db.execute("PRAGMA table_info('sessions')") as cursor:
+                    columns = [row[1] for row in await cursor.fetchall()]
+
+                # 1. Delete sessions older than 30 days if create_time exists
+                if "create_time" in columns:
+                    await db.execute(
+                        "DELETE FROM sessions WHERE create_time < datetime('now', '-30 days')"
+                    )
+
+                # 2. Keep maximum last 20 sessions (using rowid as fallback if create_time missing)
+                sort_col = "create_time" if "create_time" in columns else "rowid"
+                await db.execute(
+                    f"""
+                    DELETE FROM sessions WHERE id NOT IN (
+                        SELECT id FROM sessions ORDER BY {sort_col} DESC LIMIT 20
+                    )
+                """
+                )
+                await db.commit()
+                print("[VEGA] Session cleanup complete")
+        except Exception as e:
+            print(f"[VEGA] Session cleanup error: {e}")
+
+    def _start_conversation_window(self):
+        self.conversation_active = True
+        asyncio.run_coroutine_threadsafe(
+            self.sio.emit("conversation_mode_active", {"active": True}), self.loop
+        )
+        if self._conversation_timer:
+            self._conversation_timer.cancel()
+        self._conversation_timer = threading.Timer(
+            25.0, self._end_conversation_window
+        )
+        self._conversation_timer.daemon = True
+        self._conversation_timer.start()
+
+    def _end_conversation_window(self):
+        self.conversation_active = False
+        asyncio.run_coroutine_threadsafe(
+            self.sio.emit("conversation_mode_active", {"active": False}), self.loop
+        )
+
+    def request_interrupt(self):
+        self._interrupt_requested = True
+
+    def _update_buffer(self, user_input, vega_response):
+        self.conversation_buffer.append({
+            "role": "user",
+            "content": user_input
+        })
+        self.conversation_buffer.append({
+            "role": "vega",
+            "content": vega_response
+        })
+        if len(self.conversation_buffer) > self.max_buffer_size:
+            self.conversation_buffer = self.conversation_buffer[-self.max_buffer_size:]
 
     @property
     def client(self):
@@ -222,6 +326,28 @@ class ADKOrchestrator:
             asyncio.run_coroutine_threadsafe(
                 self.sio.emit("state_change", {"state": self.state}), self.loop
             )
+
+    async def build_instruction(self, user_input: str) -> str:
+        """Dynamically builds the agent instruction with profile and memory context."""
+        profile_header = get_profile_header()
+        memory_context = await retrieve_relevant_memories(self.user_id, user_input)
+        
+        instruction = (
+            f"{BASE_INSTRUCTION}\n\n"
+            "OPERATOR PROFILE:\n"
+            f"{profile_header}\n\n"
+            "RECENT MEMORY:\n"
+            f"{memory_context}"
+        )
+
+        if self.conversation_buffer:
+            history_str = "\n\nRECENT CONVERSATION:\n"
+            for entry in self.conversation_buffer:
+                role = "User" if entry["role"] == "user" else "VEGA"
+                history_str += f"{role}: {entry['content']}\n"
+            instruction += history_str
+
+        return instruction
 
     def on_wake_word_detected(self):
         """Called by the wake word engine when 'vega' is heard."""
@@ -243,6 +369,11 @@ class ADKOrchestrator:
 
     def process_text_command(self, text: str):
         """Called when a transcribed text command needs processing."""
+        if self.conversation_active is True:
+            if self._conversation_timer:
+                self._conversation_timer.cancel()
+            # timer resets after response
+
         self.transition_to("PROCESSING")
 
         if self.loop:
@@ -323,7 +454,7 @@ class ADKOrchestrator:
         def _thread_runner():
             try:
                 for event in self.runner.run(
-                    user_id="user_1",
+                    user_id=self.user_id,
                     session_id=self.session_id,
                     new_message=message,
                 ):
@@ -393,6 +524,7 @@ class ADKOrchestrator:
             await self.sio.emit("speak", {"audio": audio_b64, "format": format})
 
         try:
+            self.agent.instruction = await self.build_instruction(text)
             message = types.Content(
                 role="user", parts=[types.Part.from_text(text=text)]
             )
@@ -479,6 +611,17 @@ class ADKOrchestrator:
 
             self.transition_to("IDLE")
 
+            # CHANGE 3 — Save memory after each turn
+            await save_memory(
+                user_id=self.user_id,
+                user_input=text,
+                vega_response=full_response,
+                active_scene=self.current_scene if hasattr(self, 'current_scene') else ""
+            )
+
+            # CHANGE 4 — Update buffer after each turn
+            self._update_buffer(text, full_response)
+
         except Exception as exc:
             import traceback
 
@@ -488,6 +631,8 @@ class ADKOrchestrator:
                 {"message": "[Vega]: I encountered an error processing your request."},
             )
             self.transition_to("IDLE")
+        finally:
+            self._start_conversation_window()
 
     async def _generate_tts_audio(self, text: str) -> tuple[bytes | None, str | None]:
         """Generate high-fidelity audio using GCloud Studio Voices, fallback to edge-tts."""

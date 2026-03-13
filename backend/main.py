@@ -88,7 +88,7 @@ async def on_wake_word_detected():
 
 def start_listening_thread():
     engine = WakeWordEngine(wake_word="vega")
-    engine.listen(
+    engine.start(
         lambda: asyncio.run_coroutine_threadsafe(on_wake_word_detected(), main_loop)
     )
 
@@ -257,15 +257,13 @@ async def user_audio(sid, data):
         adk_orchestrator.process_audio_command(data)
 
 
-@sio.event
-async def interrupt(sid, data):
+@sio.on("interrupt")
+async def handle_interrupt(sid, data=None):
     """Restore interrupt handling."""
     if adk_orchestrator:
-        adk_orchestrator._interrupt_requested = True
-    await sio.emit(
-        "log", {"message": "⚠️ [Vega]: Interrupt received. Stopping..."}, room=sid
-    )
-    await sio.emit("state_change", {"state": "IDLE"}, room=sid)
+        adk_orchestrator.request_interrupt()
+    await sio.emit("state_change", {"state": "IDLE"})
+    logger.info("[VEGA] Interrupted by user")
 
 
 async def telemetry_loop():

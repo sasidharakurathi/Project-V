@@ -106,6 +106,7 @@ function App() {
   const [audioLevel, setAudioLevel] = useState<number>(0)
   const [inputText, setInputText] = useState('')
   const [wakeFlash, setWakeFlash] = useState(false)
+  const [conversationActive, setConversationActive] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const socketRef = useRef<Socket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -117,6 +118,8 @@ function App() {
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSpeakingRef = useRef<boolean>(false)
   const stopListeningRef = useRef<() => void>(() => { })
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
 
   // Audio Queue System
   const audioQueueRef = useRef<{ audio: string, format: string, sampleRate?: number, silent?: boolean }[]>([])
@@ -165,6 +168,13 @@ function App() {
         }
         return prev;
       })
+    })
+
+    socket.on('conversation_mode_active', (data: { active: boolean }) => {
+      setConversationActive(data.active)
+      if (data.active) {
+        window.dispatchEvent(new CustomEvent('force-mic-start'))
+      }
     })
 
     socket.on('wake_word_detected', () => {
@@ -234,11 +244,15 @@ function App() {
         const source = ctx.createBufferSource()
         source.buffer = audioBuffer
         source.connect(ctx.destination)
+        currentSourceRef.current = source
 
         if (!data.silent) setSystemState('SPEAKING')
 
         source.onended = () => {
-          playNextInQueue()
+          if (currentSourceRef.current === source) {
+            currentSourceRef.current = null
+            playNextInQueue()
+          }
         }
         source.start()
       } catch (e) {
@@ -259,6 +273,36 @@ function App() {
       socket.disconnect()
     }
   }, [])
+
+  const handleInterrupt = () => {
+    if (systemState === 'SPEAKING') {
+      if (socketRef.current) socketRef.current.emit('interrupt')
+
+      // Stop Web Audio API playback
+      if (currentSourceRef.current) {
+        try { currentSourceRef.current.stop(); } catch (e) { }
+        currentSourceRef.current = null
+      }
+      audioQueueRef.current = []
+
+      // Legacy support for user's requested audioRef if they want to use it elsewhere
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+      }
+
+      setSystemState('IDLE')
+      addLog('⚠️ Interrupt triggered.')
+    }
+  }
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleInterrupt()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [systemState])
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -363,6 +407,14 @@ function App() {
   const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!inputText.trim()) return
+
+    const lowerText = inputText.toLowerCase().trim()
+    if ((lowerText === 'stop' || lowerText === 'cancel') && systemState === 'SPEAKING') {
+      handleInterrupt()
+      setInputText('')
+      return
+    }
+
     if (socketRef.current) socketRef.current.emit('user_command', { text: inputText })
     setInputText('')
   }
@@ -460,6 +512,25 @@ function App() {
               >
                 {isListening ? <Mic size={28} color="#fff" /> : <MicOff size={28} color="#a1a1aa" />}
               </motion.div>
+              {conversationActive && (
+                <div style={{
+                  position: 'absolute',
+                  top: '-12px',
+                  right: '-12px',
+                  backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                  border: '1px solid #06b6d4',
+                  color: '#06b6d4',
+                  borderRadius: '12px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  fontWeight: 'bold',
+                  letterSpacing: '0.05em',
+                  boxShadow: '0 0 10px rgba(6, 182, 212, 0.3)',
+                  zIndex: 20,
+                }}>
+                  CONV
+                </div>
+              )}
             </div>
             <h3>
               {systemState === 'IDLE' ? 'System Idle' :

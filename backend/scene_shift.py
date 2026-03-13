@@ -141,7 +141,7 @@ async def classify_by_gemini(titles: list[str], gemini_client) -> Optional[str]:
         )
 
         response = gemini_client.models.generate_content(
-            model="gemini-2.0-flash", contents=prompt
+            model="gemini-2.5-flash", contents=prompt
         )
         mode = response.text.strip().upper()
         if mode in ["FOCUS", "CALL", "BROWSE", "UNWIND"]:
