@@ -43,6 +43,7 @@ from file_ops import (
     create_folder_structure,
 )
 from scene_shift import save_scene, apply_scene
+from vision import analyze_screen
 
 
 load_dotenv()
@@ -97,6 +98,66 @@ async def restore_scene(name: str) -> str:
     if success:
         return f"Environment transition complete. '{name}' scene applied."
     return f"I couldn't find a saved scene named '{name}'."
+
+
+async def describe_screen() -> str:
+    """Describes what is currently on the screen."""
+    if not _check_vision_enabled():
+        return "Vision is currently disabled. Say 'enable vision' to turn it on."
+    return await analyze_screen(
+        "Describe what the user is currently doing "
+        "and what is visible on screen in detail."
+    )
+
+
+async def read_error_on_screen() -> str:
+    """Reads any error or exception visible on screen."""
+    if not _check_vision_enabled():
+        return "Vision is currently disabled. Say 'enable vision' to turn it on."
+    return await analyze_screen(
+        "Is there any error, exception, or warning "
+        "visible on screen? If yes, extract the full "
+        "error text exactly as shown."
+    )
+
+
+async def find_ui_element(element_description: str) -> str:
+    """Finds a UI element on screen and returns its location."""
+    if not _check_vision_enabled():
+        return "Vision is currently disabled. Say 'enable vision' to turn it on."
+    return await analyze_screen(
+        f"Find this UI element on screen: "
+        f"{element_description}. "
+        f"Describe its location precisely."
+    )
+
+
+def _check_vision_enabled() -> bool:
+    """Runtime check for vision_enabled flag in vega_config.json."""
+    try:
+        config_path = os.path.join(os.path.dirname(__file__), "vega_config.json")
+        if not os.path.exists(config_path):
+            return False
+        with open(config_path, "r") as f:
+            config = json.load(f)
+            return config.get("vision_enabled", False)
+    except:
+        return False
+
+
+def toggle_vision(enabled: bool) -> str:
+    """Enables or disables VEGA's screen vision."""
+    try:
+        config_path = os.path.join(os.path.dirname(__file__), "vega_config.json")
+        with open(config_path) as f:
+            config = json.load(f)
+        config["vision_enabled"] = enabled
+        with open(config_path, "w") as f:
+            json.dump(config, f, indent=2)
+        status = "enabled" if enabled else "disabled"
+        return f"Vision {status}."
+    except Exception as e:
+        return f"Could not toggle vision: {e}"
 
 
 BASE_INSTRUCTION = (
@@ -157,8 +218,6 @@ class ADKOrchestrator:
         self.state = "IDLE"
         self._client = None
         self._interrupt_requested = False  # Set True to cancel in-flight tasks
-        self.conversation_active = False
-        self._conversation_timer = None
         self.conversation_buffer = []
         self.max_buffer_size = 6
 
@@ -203,6 +262,10 @@ class ADKOrchestrator:
                     route_to_comm_agent,
                     save_current_scene,
                     restore_scene,
+                    describe_screen,
+                    read_error_on_screen,
+                    find_ui_element,
+                    toggle_vision,
                 ],
             )
             # Use a SQLite database for persistent session storage
@@ -220,6 +283,7 @@ class ADKOrchestrator:
                 auto_create_session=True,
             )
             self.user_id = self._load_or_create_config()
+            self.vision_enabled = self._load_vision_config()
             self.session_id = datetime.now().strftime("session_%Y%m%d_%H%M%S")
             asyncio.create_task(self._cleanup_old_sessions())
 
@@ -249,6 +313,16 @@ class ADKOrchestrator:
         except Exception as e:
             print(f"[Config] Error reading config: {e}. Falling back to transient ID.")
             return "user_1"
+
+    def _load_vision_config(self) -> bool:
+        try:
+            with open(
+                os.path.join(os.path.dirname(__file__), "vega_config.json")
+            ) as f:
+                config = json.load(f)
+                return config.get("vision_enabled", False)
+        except:
+            return False
 
     async def _cleanup_old_sessions(self):
         """Cleanup old sessions from the database."""
@@ -281,24 +355,6 @@ class ADKOrchestrator:
         except Exception as e:
             print(f"[VEGA] Session cleanup error: {e}")
 
-    def _start_conversation_window(self):
-        self.conversation_active = True
-        asyncio.run_coroutine_threadsafe(
-            self.sio.emit("conversation_mode_active", {"active": True}), self.loop
-        )
-        if self._conversation_timer:
-            self._conversation_timer.cancel()
-        self._conversation_timer = threading.Timer(
-            25.0, self._end_conversation_window
-        )
-        self._conversation_timer.daemon = True
-        self._conversation_timer.start()
-
-    def _end_conversation_window(self):
-        self.conversation_active = False
-        asyncio.run_coroutine_threadsafe(
-            self.sio.emit("conversation_mode_active", {"active": False}), self.loop
-        )
 
     def request_interrupt(self):
         self._interrupt_requested = True
@@ -369,11 +425,6 @@ class ADKOrchestrator:
 
     def process_text_command(self, text: str):
         """Called when a transcribed text command needs processing."""
-        if self.conversation_active is True:
-            if self._conversation_timer:
-                self._conversation_timer.cancel()
-            # timer resets after response
-
         self.transition_to("PROCESSING")
 
         if self.loop:
@@ -414,7 +465,13 @@ class ADKOrchestrator:
                     model="gemini-2.5-flash", contents=[prompt, audio_part]
                 )
 
-                transcript = response.text.strip()
+                raw = response.text if response.text else ""
+                transcript = raw.strip()
+
+                if not transcript:
+                    print("[STT] Empty transcription, ignoring")
+                    self.transition_to("IDLE")
+                    return
 
                 if self.loop:
                     asyncio.run_coroutine_threadsafe(
@@ -622,6 +679,12 @@ class ADKOrchestrator:
             # CHANGE 4 — Update buffer after each turn
             self._update_buffer(text, full_response)
 
+            # Vision status sync
+            if "Vision enabled." in full_response or "Vision disabled." in full_response:
+                enabled = "Vision enabled." in full_response
+                self.vision_enabled = enabled
+                await self.sio.emit("vision_status", {"enabled": enabled})
+
         except Exception as exc:
             import traceback
 
@@ -632,7 +695,8 @@ class ADKOrchestrator:
             )
             self.transition_to("IDLE")
         finally:
-            self._start_conversation_window()
+            self._is_processing = False
+            self.transition_to("IDLE")
 
     async def _generate_tts_audio(self, text: str) -> tuple[bytes | None, str | None]:
         """Generate high-fidelity audio using GCloud Studio Voices, fallback to edge-tts."""

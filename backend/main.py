@@ -266,6 +266,17 @@ async def handle_interrupt(sid, data=None):
     logger.info("[VEGA] Interrupted by user")
 
 
+@sio.on("get_vision_status")
+async def handle_vision_status(sid, data=None):
+    try:
+        with open("vega_config.json") as f:
+            config = json.load(f)
+        enabled = config.get("vision_enabled", False)
+        await sio.emit("vision_status", {"enabled": enabled})
+    except:
+        await sio.emit("vision_status", {"enabled": False})
+
+
 async def telemetry_loop():
     while True:
         try:

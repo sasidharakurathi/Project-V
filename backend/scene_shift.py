@@ -18,6 +18,12 @@ import psutil
 import aiosqlite
 import win32gui
 import win32process
+import os
+import base64
+import io
+import mss
+from PIL import Image
+from google import genai
 
 # pycaw for volume + audio device control
 try:
@@ -150,6 +156,61 @@ async def classify_by_gemini(titles: list[str], gemini_client) -> Optional[str]:
         print(f"[SceneShift] Gemini fallback error: {e}")
 
     return None
+
+
+async def classify_scene_visually(api_key: str) -> str | None:
+    """
+    Captures screen and uses Gemini 2.5 Flash to classify the scene visually.
+    """
+    try:
+        # Check vega_config.json for vision_enabled
+        config_path = os.path.join(os.path.dirname(__file__), "vega_config.json")
+        with open(config_path, "r") as f:
+            config = json.load(f)
+            if not config.get("vision_enabled", False):
+                return None
+
+        # Capture screen
+        with mss.mss() as sct:
+            monitor = sct.monitors[1]
+            sct_img = sct.grab(monitor)
+            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+
+        # Convert to base64
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+        # Send to Gemini
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Classify the user's current activity as exactly ONE word from this list: "
+            "coding, video_call, browsing, entertainment, writing, idle. "
+            "Return ONLY the single classification word, nothing else."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                prompt,
+                {"mime_type": "image/png", "data": encoded_image}
+            ]
+        )
+
+        result = response.text.strip().lower()
+        # Map visual categories to scene modes
+        mapping = {
+            "coding": "FOCUS",
+            "video_call": "CALL",
+            "browsing": "BROWSE",
+            "entertainment": "UNWIND",
+            "writing": "FOCUS",
+            "idle": "IDLE"
+        }
+        return mapping.get(result)
+
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -312,6 +373,8 @@ class SceneShiftDetector:
         self._thread: Optional[threading.Thread] = None
         self._current_mode: Optional[str] = None
         self._last_gemini_call: float = 0.0
+        self._last_visual_call: float = 0.0
+        self.VISUAL_COOLDOWN = 45  # seconds
 
     async def start(self):
         """Starts the background scene detection task."""
@@ -356,10 +419,22 @@ class SceneShiftDetector:
                 self._last_gemini_call = time.time()
                 detected_mode = await classify_by_gemini(titles, self.gemini_client)
 
+        # 3. Visual Classification Override (rate-limited to 45s)
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if api_key:
+            elapsed_visual = time.time() - self._last_visual_call
+            if elapsed_visual >= self.VISUAL_COOLDOWN:
+                self._last_visual_call = time.time()
+                visual_result = await classify_scene_visually(api_key)
+                if visual_result and visual_result != detected_mode:
+                    print(f"[SceneShift] Visual override: {visual_result}")
+                    logger.info(f"Visual override: {visual_result}")
+                    detected_mode = visual_result
+
         if not detected_mode:
             return  # Could not classify — do nothing
 
-        # 3. Only act if mode actually changed
+        # 4. Only act if mode actually changed
         if detected_mode == self._current_mode:
             return
 

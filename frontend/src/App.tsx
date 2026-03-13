@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Mic, MicOff, Search, Monitor, Mail, FileText, Settings, Key, Globe, LayoutDashboard, Terminal, Activity, Send, Cpu, Database, HardDrive, MonitorPlay, Wifi, BatteryMedium, Zap } from 'lucide-react'
+import { Mic, MicOff, Search, Monitor, Mail, FileText, Settings, Key, Globe, LayoutDashboard, Terminal, Activity, Send, Cpu, Database, HardDrive, MonitorPlay, Wifi, BatteryMedium, Zap, Eye, EyeOff } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import io, { Socket } from 'socket.io-client'
 import { TitleBar } from './components/TitleBar'
@@ -105,8 +105,9 @@ function App() {
   const [logs, setLogs] = useState<LogMessage[]>([])
   const [audioLevel, setAudioLevel] = useState<number>(0)
   const [inputText, setInputText] = useState('')
+  const [micActive, setMicActive] = useState(false)
   const [wakeFlash, setWakeFlash] = useState(false)
-  const [conversationActive, setConversationActive] = useState(false)
+  const [visionEnabled, setVisionEnabled] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
   const socketRef = useRef<Socket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
@@ -120,6 +121,7 @@ function App() {
   const stopListeningRef = useRef<() => void>(() => { })
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null)
+  const wasListeningBeforeSpeakRef = useRef<boolean>(false)
 
   // Audio Queue System
   const audioQueueRef = useRef<{ audio: string, format: string, sampleRate?: number, silent?: boolean }[]>([])
@@ -153,6 +155,7 @@ function App() {
 
     socket.on('state_change', (data: { state: any }) => {
       setSystemState(data.state)
+      isSpeakingRef.current = (data.state === 'SPEAKING')
     })
 
     socket.on('scene_change', (data: { mode: string; color: string }) => {
@@ -161,6 +164,7 @@ function App() {
     })
 
     socket.on('wake_trigger', () => {
+      if (isSpeakingRef.current) return;
       setIsListening(prev => {
         if (!prev) {
           window.dispatchEvent(new CustomEvent('force-mic-start'))
@@ -170,14 +174,15 @@ function App() {
       })
     })
 
-    socket.on('conversation_mode_active', (data: { active: boolean }) => {
-      setConversationActive(data.active)
-      if (data.active) {
-        window.dispatchEvent(new CustomEvent('force-mic-start'))
-      }
+
+    socket.on("vision_status", (data) => {
+      setVisionEnabled(data.enabled)
     })
 
+    socket.emit("get_vision_status")
+
     socket.on('wake_word_detected', () => {
+      if (isSpeakingRef.current) return;
       // Audio Feedback: 880Hz beep, 120ms, 0.15 gain
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
       const ctx = new AudioCtx()
@@ -200,7 +205,18 @@ function App() {
       if (audioQueueRef.current.length === 0) {
         isAudioPlayingRef.current = false
         // Only return to IDLE if we were SPEAKING (ignore silent greetings)
-        setSystemState(prev => prev === 'SPEAKING' ? 'IDLE' : prev)
+        setSystemState(prev => {
+          if (prev === 'SPEAKING') {
+            isSpeakingRef.current = false
+            return 'IDLE'
+          }
+          return prev
+        })
+        // Restart mic if it was active before speech
+        if (wasListeningBeforeSpeakRef.current) {
+          wasListeningBeforeSpeakRef.current = false
+          startListening()
+        }
         return
       }
 
@@ -246,12 +262,29 @@ function App() {
         source.connect(ctx.destination)
         currentSourceRef.current = source
 
-        if (!data.silent) setSystemState('SPEAKING')
+        if (!data.silent) {
+          setSystemState('SPEAKING')
+          isSpeakingRef.current = true
+        }
+
+        // Disable mic tracks while speaking
+        if (microphoneRef.current && microphoneRef.current.mediaStream) {
+          microphoneRef.current.mediaStream.getAudioTracks().forEach(t => t.enabled = false)
+        }
 
         source.onended = () => {
           if (currentSourceRef.current === source) {
             currentSourceRef.current = null
-            playNextInQueue()
+
+            // Wait 1500ms before re-enabling mic
+            // Keep isSpeakingRef.current = true during this dead zone
+            setTimeout(() => {
+              isSpeakingRef.current = false
+              if (microphoneRef.current && microphoneRef.current.mediaStream) {
+                microphoneRef.current.mediaStream.getAudioTracks().forEach(t => t.enabled = true)
+              }
+              playNextInQueue()
+            }, 1500)
           }
         }
         source.start()
@@ -263,6 +296,12 @@ function App() {
     }
 
     socket.on('speak', (data: { audio: string, format: string, sampleRate?: number, silent?: boolean }) => {
+      // Guard: Stop mic if listening to avoid self-capture
+      if (isListening) {
+        wasListeningBeforeSpeakRef.current = true
+        stopListening()
+      }
+
       audioQueueRef.current.push(data)
       if (!isAudioPlayingRef.current) {
         playNextInQueue()
@@ -276,6 +315,7 @@ function App() {
 
   const handleInterrupt = () => {
     if (systemState === 'SPEAKING') {
+      isSpeakingRef.current = false
       if (socketRef.current) socketRef.current.emit('interrupt')
 
       // Stop Web Audio API playback
@@ -362,6 +402,7 @@ function App() {
       analyserRef.current = analyser
       microphoneRef.current = microphone
       setIsListening(true)
+      setMicActive(true)
       isSpeakingRef.current = true
       requestRef.current = requestAnimationFrame(updateAudioLevel)
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
@@ -370,7 +411,22 @@ function App() {
       mediaRecorder.onstop = () => {
         if (audioChunksRef.current.length > 0) {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-          if (socketRef.current) socketRef.current.emit('user_audio', audioBlob)
+
+          // Guard: Do not send to backend if we are already speaking
+          // This uses isSpeakingRef to catch async trail audio
+          if (!isSpeakingRef.current) {
+            // Check minimum audio length (5000 bytes)
+            if (audioBlob.size < 5000) {
+              console.log("[MicGuard] Audio too short, discarding:", audioBlob.size, "bytes")
+              setMicActive(false)
+            } else {
+              setMicActive(false)
+              if (socketRef.current) socketRef.current.emit('user_audio', audioBlob)
+            }
+          } else {
+            console.log("[MicGuard] Dropped self-capture audio chunk.")
+          }
+
           audioChunksRef.current = []
         }
       }
@@ -392,6 +448,7 @@ function App() {
     }
     if (audioContextRef.current) audioContextRef.current.close()
     setIsListening(false)
+    setMicActive(false)
     setAudioLevel(0)
   }
   stopListeningRef.current = stopListening
@@ -435,6 +492,13 @@ function App() {
           <div className="status-badge">
             <div className={`status-dot ${socketStatus}`} />
             <span>{socketStatus}</span>
+          </div>
+          <div className={`vision-indicator ${visionEnabled ? 'enabled' : 'disabled'}`} style={{ marginRight: '8px', display: 'flex', alignItems: 'center' }}>
+            {visionEnabled ? (
+              <Eye size={16} color="#22c55e" style={{ filter: 'drop-shadow(0 0 5px #22c55e)' }} />
+            ) : (
+              <EyeOff size={16} color="#64748b" />
+            )}
           </div>
           <button className="icon-btn"><Settings size={16} /></button>
         </div>
@@ -505,32 +569,30 @@ function App() {
                 </>
               )}
               <motion.div
-                className={`voice-orb ${isListening ? 'active' : systemState === 'SPEAKING' ? 'speaking' : ''}`}
+                className={`voice-orb ${micActive ? 'active' : ''}`}
                 style={wakeFlash ? { backgroundColor: '#fff', boxShadow: '0 0 20px #fff' } : {}}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                {isListening ? <Mic size={28} color="#fff" /> : <MicOff size={28} color="#a1a1aa" />}
+                {micActive ? <Mic size={28} color="#fff" /> : <MicOff size={28} color="#a1a1aa" />}
               </motion.div>
-              {conversationActive && (
-                <div style={{
-                  position: 'absolute',
-                  top: '-12px',
-                  right: '-12px',
-                  backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                  border: '1px solid #06b6d4',
-                  color: '#06b6d4',
-                  borderRadius: '12px',
-                  padding: '2px 8px',
-                  fontSize: '10px',
-                  fontWeight: 'bold',
-                  letterSpacing: '0.05em',
-                  boxShadow: '0 0 10px rgba(6, 182, 212, 0.3)',
-                  zIndex: 20,
-                }}>
-                  CONV
-                </div>
-              )}
+              <AnimatePresence>
+                {systemState === 'SPEAKING' && (
+                  <motion.div
+                    className="sound-wave"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <div className="bar bar-1" />
+                    <div className="bar bar-2" />
+                    <div className="bar bar-3" />
+                    <div className="bar bar-4" />
+                    <div className="bar bar-5" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
             <h3>
               {systemState === 'IDLE' ? 'System Idle' :

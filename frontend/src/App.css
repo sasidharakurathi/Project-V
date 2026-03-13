@@ -553,21 +553,7 @@ body {
   }
 }
 
-/* SPEAKING state — purple/violet orb */
-.voice-orb.speaking {
-  border-color: #a855f7;
-  background: radial-gradient(circle at center, #2d1050, #000);
-  box-shadow:
-    0 0 60px rgba(168, 85, 247, 0.5),
-    inset 0 0 30px rgba(168, 85, 247, 0.3);
-}
-
-.voice-orb.speaking::after {
-  background: #a855f7;
-  opacity: 0.8;
-  filter: blur(12px);
-  animation: speaking-pulse 0.8s infinite alternate;
-}
+/* SPEAKING state — purple/violet orb - REMOVED, mic icon no longer changes for VEGA speech */
 
 @keyframes speaking-pulse {
   from {
@@ -578,6 +564,45 @@ body {
   to {
     transform: scale(1.3);
     opacity: 1;
+  }
+}
+
+/* Sound Wave Visualizer (VEGA Speaking) */
+.sound-wave {
+  position: absolute;
+  bottom: -40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 20px;
+  z-index: 10;
+}
+
+.sound-wave .bar {
+  width: 3px;
+  background: var(--hud-cyan);
+  border-radius: 3px;
+  box-shadow: 0 0 8px var(--hud-cyan-glow);
+  animation: soundWave ease-in-out infinite;
+}
+
+.bar-1 { animation-duration: 0.5s; animation-delay: 0.1s; }
+.bar-2 { animation-duration: 0.7s; animation-delay: 0.2s; }
+.bar-3 { animation-duration: 0.4s; animation-delay: 0.0s; }
+.bar-4 { animation-duration: 0.6s; animation-delay: 0.3s; }
+.bar-5 { animation-duration: 0.5s; animation-delay: 0.1s; }
+
+@keyframes soundWave {
+  0%, 100% {
+    height: 4px;
+    transform: scaleY(1);
+  }
+  50% {
+    height: 20px;
+    transform: scaleY(1.2);
   }
 }
 
