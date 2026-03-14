@@ -566,7 +566,7 @@ class ADKOrchestrator:
     async def _run_agent(self, text: str):
         """Stream response and generate TTS in parallel using Google Cloud Studio Voice."""
         SENTENCE_ENDINGS = (".", "!", "?", "\n")
-        MIN_SENTENCE_LEN = 4
+        MIN_SENTENCE_LEN = 80
 
         sentence_buffer = ""
         tts_tasks: list[tuple[str, "asyncio.Task[tuple[bytes | None, str | None]]"]] = (
@@ -577,9 +577,15 @@ class ADKOrchestrator:
         tool_results: list[str] = []
 
         def _next_sentence(buf: str) -> tuple[str, str]:
-            for i, ch in enumerate(buf):
-                if ch in SENTENCE_ENDINGS:
-                    return buf[: i + 1].strip(), buf[i + 1 :].lstrip()
+            # Do not split on decimal numbers like 80.3
+            # Do not split if dot is followed by a digit
+            # Only split on . ! ? followed by space+capital
+            # or end of string
+            pattern = r'(?<![0-9])([.!?])(?=\s+[A-Z]|\s*$)'
+            match = re.search(pattern, buf)
+            if match:
+                end = match.end()
+                return buf[:end].strip(), buf[end:].lstrip()
             return "", buf
 
         def _clean_text_for_tts(text: str) -> str:
@@ -596,6 +602,14 @@ class ADKOrchestrator:
             text = text.replace("`", "")
             # Collapse multiple whitespace/newlines into single space
             text = re.sub(r"\s+", " ", text)
+
+            # Replace period-space between sentences
+            # with a comma for smoother TTS flow
+            # Only when there are multiple short sentences
+            sentences = text.split('. ')
+            if len(sentences) > 1 and len(text) < 200:
+                text = ', '.join(sentences).rstrip(',')
+
             return text.strip()
 
         async def _tts_background(sentence: str) -> tuple[bytes | None, str | None]:
@@ -687,6 +701,15 @@ class ADKOrchestrator:
                 tts_tasks.append((remainder, task))
 
             full_response = "".join(full_response_parts).strip()
+            
+            # Ensure space after every sentence-ending
+            # punctuation so TTS reads naturally
+            full_response = re.sub(
+                r'([.!?])([A-Z])', r'\1 \2', full_response
+            )
+            # Remove any double spaces created
+            full_response = re.sub(r' +', ' ', full_response).strip()
+
             if not full_response:
                 # Use the tool's own result if the model didn't narrate
                 if tool_results:
@@ -698,8 +721,23 @@ class ADKOrchestrator:
 
             await self.sio.emit("log", {"message": f"[Vega]: {full_response}"})
 
-            # --- PARALLEL AUDIO PLAYBACK ---
-            if tts_tasks and not self._interrupt_requested:
+            # --- AUDIO PLAYBACK ---
+            # For short responses (under 300 chars),
+            # skip chunked TTS entirely — send as one call
+            if len(full_response) <= 300 and not tts_tasks:
+                audio_bytes, audio_format = (
+                    await self._generate_tts_audio(full_response)
+                )
+                if audio_bytes:
+                    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+                    self.transition_to("SPEAKING")
+                    await self.sio.emit(
+                        "speak",
+                        {"audio": audio_b64, "format": audio_format}
+                    )
+
+            # Only use chunked TTS for long responses
+            elif tts_tasks and not self._interrupt_requested:
                 for sentence, task in tts_tasks:
                     if self._interrupt_requested:
                         task.cancel()
