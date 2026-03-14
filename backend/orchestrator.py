@@ -21,6 +21,7 @@ from google.adk.sessions import (
 from google.adk.tools import AgentTool
 from file_agent import file_agent
 from browser_agent import browser_agent
+from search_agent import search_agent
 from google.genai import types
 from google.cloud import texttospeech
 
@@ -111,8 +112,9 @@ async def describe_screen() -> str:
     if not _check_vision_enabled():
         return "Vision is currently disabled. Say 'enable vision' to turn it on."
     return await analyze_screen(
-        "Describe what the user is currently doing "
-        "and what is visible on screen in detail."
+        "Describe what is on screen in 2-3 sentences. "
+        "If there is code visible, read it and mention "
+        "what it does or any obvious issues you see."
     )
 
 
@@ -121,9 +123,15 @@ async def read_error_on_screen() -> str:
     if not _check_vision_enabled():
         return "Vision is currently disabled. Say 'enable vision' to turn it on."
     return await analyze_screen(
-        "Is there any error, exception, or warning "
-        "visible on screen? If yes, extract the full "
-        "error text exactly as shown."
+        "Look at the screen carefully. Report ANY of:\n"
+        "1. Python/code errors, typos, wrong imports, misspelled module names, syntax issues\n"
+        "2. Runtime exceptions or tracebacks\n"
+        "3. Warning messages in any application\n"
+        "4. Red underlines or squiggles in code editors\n"
+        "5. Error dialogs or popups\n"
+        "If you see code, read it carefully and check if the logic or imports look correct. "
+        "Quote the exact problematic text you see. "
+        "If nothing wrong, say: No issues visible."
     )
 
 
@@ -184,7 +192,21 @@ BASE_INSTRUCTION = (
     "- Short punchy sentences. Active voice.\n"
     "- Call the operator 'boss' sometimes.\n"
     "- No 'Certainly', 'Of course', 'Absolutely', 'Happy to help'.\n"
-    "- No narrating intent: no 'Opening...', 'Let me...', 'I will...'.\n"
+    "- No narrating intent: no 'Opening...', 'Let me...', 'I will...'.\n\n"
+
+    "AVAILABLE TOOLS:\n"
+    "- standard system tools (volume, brightness, wifi, etc.)\n"
+    "- open_application: launch desktop apps\n"
+    "- open_url: visit websites\n"
+    "- search_agent_tool: search the web for current news, facts, prices, any live information\n"
+    "- file_agent_tool: managing files and folders\n"
+    "- browser_agent_tool: deep web tasks\n\n"
+
+    "FEW-SHOT EXAMPLES:\n"
+    "User: any latest news on tech\n"
+    "VEGA: [calls search_agent_tool] Here is what I found: ...\n\n"
+    "User: what is the weather in hyderabad\n"
+    "VEGA: [calls search_agent_tool] ...\n"
 )
 
 
@@ -211,6 +233,7 @@ class ADKOrchestrator:
 
             file_agent_tool = AgentTool(agent=file_agent)
             browser_agent_tool = AgentTool(agent=browser_agent)
+            search_agent_tool = AgentTool(agent=search_agent)
 
             # Create the Vega Orchestrator using ADK framework
             self.agent = Agent(
@@ -245,6 +268,7 @@ class ADKOrchestrator:
                     toggle_vision,
                     file_agent_tool,
                     browser_agent_tool,
+                    search_agent_tool,
                 ],
             )
             # Use a SQLite database for persistent session storage
