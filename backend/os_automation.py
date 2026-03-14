@@ -4,7 +4,7 @@ import subprocess
 
 
 def open_application(app_name: str) -> str:
-    """Opens a Windows application by simulating the user opening the Start Menu, typing the app name, and hitting Enter."""
+    """Opens any desktop application by name. Use this when the user says 'open [app]', 'start [app]', 'launch [app]', or asks to run any application like spotify, chrome, notepad, teams, discord, calculator, vscode, etc. The app_name should be the simple name of the application."""
     try:
         # Press the Windows key to open the Start menu
         auto.SendKeys("{Win}")

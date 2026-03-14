@@ -278,20 +278,33 @@ async def handle_vision_status(sid, data=None):
 
 
 async def telemetry_loop():
+    fast_interval_seconds = 0.5
+    slow_refresh_every_ticks = 4  # GPU and disk refresh every 2.0s at 0.5s fast interval
+    tick = 0
+
+    cached_gpu = get_gpu_info()
+    cached_disk = get_disk_info()
+
     while True:
         try:
+            if tick % slow_refresh_every_ticks == 0:
+                cached_gpu = get_gpu_info()
+                cached_disk = get_disk_info()
+
             payload = {
                 "cpu": get_cpu_info(),
                 "memory": get_memory_info(),
-                "disk": get_disk_info(),
-                "gpu": get_gpu_info(),
+                "disk": cached_disk,
+                "gpu": cached_gpu,
                 "network": get_network_info(),
                 "battery": get_battery_info(),
             }
             await sio.emit("telemetry", payload)
-            await asyncio.sleep(2)
+            tick += 1
+            await asyncio.sleep(fast_interval_seconds)
         except Exception as e:
             print(f"Telemetry error: {e}")
+            tick += 1
             await asyncio.sleep(5)
 
 

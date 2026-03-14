@@ -212,8 +212,17 @@ def search_files(directory_path: str, query: str) -> str:
 
 
 def create_folder_structure(base_path: str, folders: str) -> str:
-    """Creates multiple subfolders at a base path. Provide a comma-separated list of folder names (e.g. 'src,assets,docs')."""
-    if not os.path.isdir(base_path):
+    """Creates folders at the given base path. Use when the user asks to create a folder, make a directory, or set up a folder structure. The base_path must be an absolute path like 'C:/Users/name/Desktop'. The folders parameter is a comma-separated list of folder names to create."""
+    # Auto-resolve common shorthand paths
+    home = Path.home()
+    shorthand_map = {
+        "desktop": str(home / "Desktop"),
+        "downloads": str(home / "Downloads"),
+        "documents": str(home / "Documents"),
+        "pictures": str(home / "Pictures"),
+    }
+    resolved = shorthand_map.get(base_path.lower().strip(), base_path)
+    if not os.path.isdir(resolved):
         return f"Error: Base path '{base_path}' does not exist."
 
     folder_list = [f.strip() for f in folders.split(",") if f.strip()]
@@ -221,10 +230,10 @@ def create_folder_structure(base_path: str, folders: str) -> str:
 
     try:
         for folder in folder_list:
-            target_path = os.path.join(base_path, folder)
+            target_path = os.path.join(resolved, folder)
             os.makedirs(target_path, exist_ok=True)
             created_count += 1
 
-        return f"Successfully created {created_count} folders at '{base_path}'."
+        return f"Created {created_count} folder(s) at '{resolved}'."
     except Exception as e:
         return f"Error creating folder structure: {e}"

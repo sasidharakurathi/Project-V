@@ -102,47 +102,14 @@ def clean_temp_files() -> str:
         return f"Failed to clean temporary files: {e}"
 
 
-def launch_app(app_name: str) -> str:
-    """Launches a common Windows application by its familiar name (e.g., 'notepad', 'calculator', 'chrome', 'spotify')."""
-    app_map = {
-        "notepad": "notepad.exe",
-        "calculator": "calc.exe",
-        "calc": "calc.exe",
-        "chrome": "chrome.exe",
-        "edge": "msedge.exe",
-        "spotify": "spotify.exe",
-        "explorer": "explorer.exe",
-        "settings": "ms-settings:",
-        "cmd": "cmd.exe",
-        "powershell": "powershell.exe",
-        "code": "code",
-        "vscode": "code",
-        "task manager": "taskmgr.exe",
-    }
-
-    executable = app_map.get(app_name.lower().strip(), app_name)
-
-    try:
-        # Use os.startfile for Windows native execution
-        os.startfile(executable)
-        return f"Successfully launched {app_name}."
-    except FileNotFoundError:
-        try:
-            # Fallback to subprocess if startfile fails
-            subprocess.Popen(executable)
-            return f"Successfully launched {app_name} via fallback."
-        except Exception as e:
-            return f"Failed to launch '{app_name}'. Error: {e}"
-    except Exception as e:
-        return f"Failed to launch '{app_name}'. Error: {e}"
 
 
 def open_url(url: str) -> str:
-    """Opens a specified URL in the default system web browser."""
+    """Opens a website URL in the default browser. Use when the user says 'open [website]', 'go to [url]', 'visit [site]', 'open youtube', 'open google.com', etc. The url should be the website address."""
     try:
-        if not url.startswith("http://") and not url.startswith("https://"):
+        if not url.startswith("http"):
             url = f"https://{url}"
         webbrowser.open(url)
-        return f"Successfully opened {url} in the browser."
+        return f"Opened {url} in browser."
     except Exception as e:
         return f"Failed to open URL '{url}': {e}"

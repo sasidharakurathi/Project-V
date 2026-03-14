@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import os from 'node:os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 process.env.APP_ROOT = join(__dirname, '..')
@@ -13,6 +14,82 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? join(process.env.APP_ROOT, 'publ
 
 let win: BrowserWindow | null
 let splashWin: BrowserWindow | null
+let fastTelemetryTimer: NodeJS.Timeout | null = null
+
+let prevCpuSnapshot = os.cpus()
+
+function computeCpuUsagePercent() {
+    const current = os.cpus()
+    let idleDelta = 0
+    let totalDelta = 0
+
+    for (let i = 0; i < current.length; i++) {
+        const prevTimes = prevCpuSnapshot[i].times
+        const nowTimes = current[i].times
+
+        const prevTotal = prevTimes.user + prevTimes.nice + prevTimes.sys + prevTimes.idle + prevTimes.irq
+        const nowTotal = nowTimes.user + nowTimes.nice + nowTimes.sys + nowTimes.idle + nowTimes.irq
+
+        idleDelta += nowTimes.idle - prevTimes.idle
+        totalDelta += nowTotal - prevTotal
+    }
+
+    prevCpuSnapshot = current
+
+    if (totalDelta <= 0) return 0
+    return Math.max(0, Math.min(100, ((totalDelta - idleDelta) / totalDelta) * 100))
+}
+
+function startFastTelemetryBridge() {
+    if (fastTelemetryTimer) {
+        clearInterval(fastTelemetryTimer)
+        fastTelemetryTimer = null
+    }
+
+    // Prime baseline snapshot to avoid first-sample spikes.
+    prevCpuSnapshot = os.cpus()
+
+    fastTelemetryTimer = setInterval(() => {
+        if (!win || win.isDestroyed()) return
+
+        const totalMemoryBytes = os.totalmem()
+        const freeMemoryBytes = os.freemem()
+        const usedMemoryBytes = totalMemoryBytes - freeMemoryBytes
+        const memoryUsagePercent = totalMemoryBytes > 0 ? (usedMemoryBytes / totalMemoryBytes) * 100 : 0
+
+        const fastPayload = {
+            cpu: {
+                result: null,
+                stats: {
+                    physical_cores: os.cpus().length,
+                    logical_cores: os.cpus().length,
+                    avg_usage_percentage: computeCpuUsagePercent(),
+                    high_usage_alert: false,
+                },
+                additional_info: null,
+            },
+            memory: {
+                result: null,
+                stats: {
+                    memory_usage_percentage: memoryUsagePercent,
+                    swap_usage_percentage: 0,
+                    total_memory_gb: totalMemoryBytes / (1024 ** 3),
+                    available_memory_gb: freeMemoryBytes / (1024 ** 3),
+                },
+                additional_info: null,
+            },
+        }
+
+        win.webContents.send('telemetry_fast', fastPayload)
+    }, 1500)
+}
+
+function stopFastTelemetryBridge() {
+    if (fastTelemetryTimer) {
+        clearInterval(fastTelemetryTimer)
+        fastTelemetryTimer = null
+    }
+}
 
 function createSplashWindow() {
     splashWin = new BrowserWindow({
@@ -56,6 +133,8 @@ function createWindow() {
     } else {
         win.loadFile(join(RENDERER_DIST, 'index.html'))
     }
+
+    startFastTelemetryBridge()
 }
 
 import { exec } from 'node:child_process'
@@ -96,6 +175,7 @@ function startBackendHeartbeat() {
 }
 
 app.on('window-all-closed', () => {
+    stopFastTelemetryBridge()
     if (process.platform !== 'darwin') {
         app.quit()
         win = null
@@ -103,6 +183,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+    stopFastTelemetryBridge()
     console.log('[Vega System]: Sending shutdown signal to elevated Python backend...')
     fetch('http://127.0.0.1:8000/api/shutdown', { method: 'POST' })
         .catch(err => console.error('Failed to shutdown Python process:', err))
@@ -147,6 +228,22 @@ app.whenReady().then(() => {
     ipcMain.once('app-ready', showMainApp)
 
     // Handle custom close button quit
+    ipcMain.on('window-minimize', () => {
+        if (win && !win.isDestroyed()) {
+            win.minimize()
+        }
+    })
+
+    ipcMain.on('window-toggle-maximize', () => {
+        if (win && !win.isDestroyed()) {
+            if (win.isMaximized()) {
+                win.unmaximize()
+            } else {
+                win.maximize()
+            }
+        }
+    })
+
     ipcMain.on('quit-app', async () => {
         console.log('[Vega System]: Quit command received from Custom UI. Shutting down...')
         try {

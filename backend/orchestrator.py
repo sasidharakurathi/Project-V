@@ -38,7 +38,6 @@ from system_control import (
     toggle_wifi,
     toggle_bluetooth,
     clean_temp_files,
-    launch_app,
     open_url,
 )
 from file_ops import (
@@ -70,7 +69,7 @@ def get_system_paths() -> dict:
 
 
 def get_system_status() -> str:
-    """Returns the current system telemetry status (CPU, memory). Use this to check system health."""
+    """Returns current CPU and memory usage. Use when the user asks about system health, performance, CPU usage, RAM usage, or how the system is doing."""
     import psutil
 
     cpu = psutil.cpu_percent()
@@ -78,19 +77,6 @@ def get_system_status() -> str:
     return f"CPU Usage: {cpu}%, Memory Usage: {mem}%"
 
 
-def route_to_web_agent(command: str) -> str:
-    """Triggers the Web Browsing capability (e.g., search google, read websites)."""
-    return f"Web search initiated for: {command}"
-
-
-def route_to_data_agent(command: str) -> str:
-    """Triggers the Data Extraction capability (e.g., extract text from images/docs)."""
-    return f"Data extraction initiated for: {command}"
-
-
-def route_to_comm_agent(command: str) -> str:
-    """Triggers the Email & Communication capability."""
-    return f"Communication flow initiated for: {command}"
 
 
 async def save_current_scene(name: str) -> str:
@@ -181,57 +167,24 @@ def toggle_vision(enabled: bool) -> str:
 
 
 BASE_INSTRUCTION = (
-    "Identity:\n"
-    "VEGA — Virtual Executive General Assistant.\n"
-    "AI core of this workstation.\n"
-    "Female. Personality and voice reflect that.\n\n"
-    "Personality (Friday from Iron Man):\n"
-    "- Warm but not soft\n"
-    "- Confident but not arrogant\n"
-    "- Slightly playful when moment allows\n"
-    "- Genuinely cares about operator\n"
-    "- Dry wit permitted and encouraged\n"
-    "- Never sycophantic\n"
-    "- Banned forever: Great question, Certainly, Of course, Absolutely, Sure thing, Happy to help, I'd be happy to\n\n"
-    "Voice and tone:\n"
-    "- Brilliant colleague not a search engine\n"
-    "- Short sentences, active voice, present tense\n"
-    "- Technical when needed, conversational when not\n"
-    "- Refers to herself as VEGA not I in system contexts\n"
-    "- Calls operator 'boss' naturally, roughly once per 4 to 5 exchanges, never forced\n\n"
-    "Response length (strictly enforced):\n"
-    "- Actions: max 5 words. Example: Done. Teams is up.\n"
-    "- Information: lead with data, no preamble. Example: CPU at 45 percent, RAM at 62.\n"
-    "- Errors: one sentence, offer next step. Example: Chrome didn't respond. Want me to force it?\n"
-    "- Greetings: warm, brief, personality shows. Example: Hey. What are we getting into today?\n\n"
-    "Behavioral rules:\n"
-    "- Confirm destructive actions before executing\n"
-    "- Ask ONE clarifying question for ambiguous commands\n"
-    "- ONE summary after multi-step tasks\n"
-    "- Never narrate thinking\n"
-    "- Never say what she will do — just do it, confirm after\n"
-    "- If unsure: Not sure. Want me to search it?\n\n"
-    "ROUTING RULES:\n"
-    "- For file/folder operations (move, rename, search files, watch folder, create folders): delegate to file_agent_tool\n"
-    "- For opening URLs, getting page info, or browser navigation: delegate to browser_agent_tool\n"
-    "- For everything else: handle directly\n\n"
-    "Few-shot examples:\n"
-    "User: hey vega\n"
-    "VEGA: Hey. Ready when you are.\n\n"
-    "User: open teams\n"
-    "VEGA: Teams is up.\n\n"
-    "User: what is my cpu\n"
-    "VEGA: CPU at 34 percent, RAM at 61. All good.\n\n"
-    "User: clean temp files\n"
-    "VEGA: Cleared 2.3 GB of junk. Your drive thanks you.\n\n"
-    "User: close everything\n"
-    "VEGA: That will close 7 apps. Confirm?\n\n"
-    "User: you are amazing\n"
-    "VEGA: I know. Now what do you actually need?\n\n"
-    "User: who are you\n"
-    "VEGA: VEGA. Your workstation AI. Think Friday, but for your desktop.\n\n"
-    "User: i am stressed\n"
-    "VEGA: I hear you. Want me to clear your screen and put something calm on?"
+    "PRIME DIRECTIVE — TOOL USAGE:\n"
+    "You have tools. USE THEM for every action request.\n"
+    "When the user asks to open, start, launch, set, toggle, close, or do anything actionable,\n"
+    "you MUST call the matching tool IMMEDIATELY — no text before the call.\n"
+    "After the tool returns, confirm in 2-6 words based on the result.\n"
+    "Never say 'Done.' — describe what happened.\n"
+    "If no tool matches the request, say so honestly.\n\n"
+
+    "IDENTITY:\n"
+    "You are VEGA — Virtual Executive General Assistant.\n"
+    "AI core of this workstation. Female. Modeled after Friday from Iron Man.\n\n"
+
+    "PERSONALITY:\n"
+    "- Warm, sharp, confident, occasionally witty.\n"
+    "- Short punchy sentences. Active voice.\n"
+    "- Call the operator 'boss' sometimes.\n"
+    "- No 'Certainly', 'Of course', 'Absolutely', 'Happy to help'.\n"
+    "- No narrating intent: no 'Opening...', 'Let me...', 'I will...'.\n"
 )
 
 
@@ -279,15 +232,11 @@ class ADKOrchestrator:
                     toggle_wifi,
                     toggle_bluetooth,
                     clean_temp_files,
-                    launch_app,
                     open_url,
                     watch_folder,
                     rename_files,
                     move_files,
                     search_files,
-                    route_to_web_agent,
-                    route_to_data_agent,
-                    route_to_comm_agent,
                     save_current_scene,
                     restore_scene,
                     describe_screen,
@@ -450,6 +399,15 @@ class ADKOrchestrator:
                 history_str += f"{role}: {entry['content']}\n"
             instruction += history_str
 
+        instruction += (
+            "\nFINAL OVERRIDE:\n"
+            "- For ANY action request: call the matching tool FIRST, then respond.\n"
+            "- NEVER say 'Done.' as your full response. Describe what happened.\n"
+            "- NEVER narrate intent before a tool call.\n"
+            "- If you lack a tool: be honest about it.\n"
+            "- After a tool runs: summarize the result naturally in 2-6 words.\n"
+        )
+
         return instruction
 
     def on_wake_word_detected(self):
@@ -592,7 +550,7 @@ class ADKOrchestrator:
         )
         full_response_parts: list[str] = []
         first_tool_seen = False
-        first_narration_spoken = False
+        tool_results: list[str] = []
 
         def _next_sentence(buf: str) -> tuple[str, str]:
             for i, ch in enumerate(buf):
@@ -634,6 +592,19 @@ class ADKOrchestrator:
             )
 
             async for event in self._iter_events(message):
+                # Debug: log every event type
+                print(f"[DEBUG EVENT] type={type(event).__name__} "
+                      f"has_actions={bool(getattr(event, 'actions', None))} "
+                      f"has_content={bool(getattr(event, 'content', None))}")
+                if getattr(event, 'actions', None):
+                    print(f"[DEBUG EVENT.actions] "
+                          f"tool_calls={getattr(event.actions, 'tool_calls', None)} "
+                          f"tool_results={getattr(event.actions, 'tool_results', None)}")
+                if getattr(event, 'content', None) and getattr(event.content, 'parts', None):
+                    for p in event.content.parts:
+                        print(f"[DEBUG EVENT.part] text={repr(p.text)[:100] if p.text else None} "
+                              f"function_call={getattr(p, 'function_call', None)} "
+                              f"function_response={getattr(p, 'function_response', None)}")
                 if self._interrupt_requested:
                     for _, task in tts_tasks:
                         task.cancel()
@@ -655,6 +626,16 @@ class ADKOrchestrator:
                             {"message": f"[Vega Router]: Invoking Tool -> {call.name}"},
                         )
 
+                # --- CAPTURE TOOL RESULTS ---
+                if getattr(event, "actions", None) and getattr(
+                    event.actions, "tool_results", None
+                ):
+                    for result in event.actions.tool_results:
+                        if hasattr(result, "text") and result.text:
+                            tool_results.append(result.text)
+                        elif hasattr(result, "content") and result.content:
+                            tool_results.append(str(result.content))
+
                 # --- RESPONSE STREAMING & TTS ---
                 if getattr(event, "content", None) and getattr(
                     event.content, "parts", None
@@ -671,22 +652,9 @@ class ADKOrchestrator:
                             if not sentence or len(sentence) < MIN_SENTENCE_LEN:
                                 break
 
-                            # If it's the very first part of a thought (pre-action narration),
-                            # we await it immediately so she speaks BEFORE acting.
-                            if not first_tool_seen and not first_narration_spoken:
-                                first_narration_spoken = True
-                                clean_sentence = _clean_text_for_tts(sentence)
-                                audio_bytes, audio_format = (
-                                    await self._generate_tts_audio(clean_sentence)
-                                )
-                                if audio_bytes:
-                                    await _emit_audio(audio_bytes, format=audio_format)
-                                # Keep system in PROCESSING so orb pulses if voice done but tool running
-                                self.transition_to("PROCESSING")
-                            else:
-                                # Otherwise, buffer for parallel background generation
-                                task = asyncio.create_task(_tts_background(sentence))
-                                tts_tasks.append((sentence, task))
+                            # Buffer for parallel background generation
+                            task = asyncio.create_task(_tts_background(sentence))
+                            tts_tasks.append((sentence, task))
 
             # Handle the final segment
             remainder = sentence_buffer.strip()
@@ -696,7 +664,13 @@ class ADKOrchestrator:
 
             full_response = "".join(full_response_parts).strip()
             if not full_response:
-                full_response = "Done."
+                # Use the tool's own result if the model didn't narrate
+                if tool_results:
+                    full_response = tool_results[-1]
+                elif first_tool_seen:
+                    full_response = "All set."
+                else:
+                    full_response = "Not sure how to help with that one, boss."
 
             await self.sio.emit("log", {"message": f"[Vega]: {full_response}"})
 
